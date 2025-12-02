@@ -1,0 +1,158 @@
+-- 客服用户表
+CREATE TABLE customer_service (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role ENUM('admin', 'supervisor', 'agent') DEFAULT 'agent',
+    online_status BOOLEAN DEFAULT FALSE,
+    max_concurrent INT DEFAULT 5,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 会话表
+CREATE TABLE chat_sessions (
+    session_id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(32) NOT NULL,  -- 闲鱼用户ID
+    agent_id INT,  -- 分配客服ID
+    status ENUM('pending', 'active', 'resolved', 'closed') DEFAULT 'pending',
+    priority INT DEFAULT 1,  -- 优先级 1-5
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_status (status),
+    INDEX idx_priority (priority),
+    FOREIGN KEY (agent_id) REFERENCES customer_service(id)
+);
+
+-- 消息表
+CREATE TABLE chat_messages (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    session_id VARCHAR(64) NOT NULL,
+    sender_type ENUM('user', 'agent', 'system') NOT NULL,
+    content TEXT NOT NULL,
+    read_status BOOLEAN DEFAULT FALSE,
+    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES chat_sessions(uconst express = require('express');
+const router = express.Router();
+const { Pool } = require('pg');
+
+// 获取待处理会话队列
+router.get('/sessions/pending', async (req, res) => {
+  try {
+    const query = `
+      SELECT s.*, u.nickname, u.avatar 
+      FROM chat_sessions s
+      LEFT JOIN user_profiles u ON s.user_id = u.id
+      WHERE s.status = 'pending'
+      ORDER BY s.priority DESC, s.created_at ASC
+      LIMIT 50
+    `;
+    const result = await db.query(query);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 客服领取会话
+router.post('/sessions/claim', async (req, res) => {
+  const { sessionId, agentId } = req.body;
+  
+  // 检查客服当前负载
+  const loadCheck = await db.query(
+    'SELECT COUNT(*) FROM chat_sessions WHERE agent_id = $1 AND status = $2',
+    [agentId, 'active']
+  );
+  
+  if (loadCheck.rows[0].count >= 5) {
+    return res.status(400).json({ 
+      success: false, 
+      error: '已达到最大并发会话数' 
+    });
+  }
+  
+  // 更新会话归属
+  await db.query(
+    `UPDATE chat_sessions 
+     SET agent_id = $1, status = 'active', claimed_at = NOW() 
+     WHERE session_id = $2 AND status = 'pending'`,
+    [agentId, sessionId]
+  );
+  
+  res.json({ success: true });
+});
+def assign_session_to_agent(session):
+    """智能分配会话给合适的客服"""
+    
+    # 1. 获取在线客服
+    online_agents = CustomerService.objects.filter(
+        online_status=True,
+        role__in=['agent', 'supervisor']
+    )
+    
+    # 2. 计算每个客服的得分
+    best_agent = None
+    best_score = -1
+    
+    for agent in online_agents:
+        score = calculate_agent_score(agent, session)
+        
+        if score > best_score:
+            best_score = score
+            best_agent = agent
+    
+    return best_agent
+
+def calculate_agent_score(agent, session):
+    """计算客服适合度得分"""
+    score = 0
+    
+    # 基于当前负载 (越低越好)
+    current_load = agent.active_sessions_count()
+    load_factor = max(0, 1 - current_load / agent.max_concurrent)
+    score += load_factor * 40  # 负载权重40%
+    
+    # 基于会话类型匹配 (如果有技能标签)
+    if hasattr(agent, 'skills') and session.tags:
+        match_count = len(set(agent.skills) & set(session.tags))
+        score += match_count * 20  # 技能匹配权重20%
+    
+    # 基于响应时间历史
+    avg_response = agent.average_response_time()
+    if avg_response < 60:  # 60秒内
+        score += 30
+    elif avg_response < 120:
+        score += 15
+    
+    return score
+<template>
+  <div class="dashboard">
+    <!-- 会话列表 -->
+    <div class="session-list">
+      <div v-for="session in pendingSessions" 
+           :key="session.id"
+           :class="['session-item', `priority-${session.priority}`]"
+           @click="claimSession(session)">
+        <div class="user-info">
+          <img :src="session.avatar" class="avatar">
+          <span class="nickname">{{ session.nickname }}</span>
+        </div>
+        <div class="session-meta">
+          <span class="wait-time">等待: {{ formatTime(session.created_at) }}</span>
+          <span class="priority-tag">优先级: {{ session.priority }}</span>
+        </div>
+        <button class="claim-btn" :disabled="session.claimed">
+          {{ session.claimed ? '已领取' : '领取会话' }}
+        </button>
+      </div>
+    </div>
+    
+    <!-- 消息界面 -->
+    <div class="chat-interface" v-if="currentSession">
+      <message-bubble 
+        v-for="msg in messages"
+        :key="msg.id"
+        :message="msg"
+        :is-agent="msg.sender_type === 'agent'"
+      />
+    </div>
+  </div>
+</template>
